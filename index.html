@@ -7,20 +7,21 @@
   <style>
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
-    html, body { margin: 0; height: 100%; background: #07070b; color: #e8e6f0; font: 14px/1.4 ui-sans-serif, system-ui, sans-serif; }
-    canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+    html, body { margin: 0; height: 100%; background: #000; color: #d7dde6; font: 14px/1.4 ui-sans-serif, system-ui, sans-serif; }
+    canvas { display: block; width: 100%; height: 100%; cursor: crosshair; image-rendering: auto; }
     #hud {
       position: fixed; inset: 16px auto auto 16px;
-      background: rgba(10,10,16,.72); backdrop-filter: blur(10px);
-      border: 1px solid #2a2a3a; border-radius: 14px; padding: 14px 16px; width: min(340px, calc(100vw - 32px));
+      background: rgba(8,10,14,.78); backdrop-filter: blur(10px);
+      border: 1px solid #2a3138; border-radius: 14px; padding: 14px 16px;
+      width: min(340px, calc(100vw - 32px));
     }
-    h1 { margin: 0 0 8px; font-size: 16px; letter-spacing: .04em; }
+    h1 { margin: 0 0 8px; font-size: 16px; letter-spacing: .04em; color: #fff; }
     .row { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
-    button, select {
-      background: #161622; color: inherit; border: 1px solid #34344a;
+    button {
+      background: #12161b; color: inherit; border: 1px solid #3a424c;
       border-radius: 8px; padding: 6px 10px; cursor: pointer;
     }
-    button.active { border-color: #8b7cff; background: #221f3a; }
+    button.active { border-color: #7eb3ff; background: #1a2430; color: #fff; }
     .meta { opacity: .65; font-size: 12px; }
   </style>
 </head>
@@ -35,71 +36,69 @@
       <button data-mode="fern">Fern</button>
     </div>
     <div class="row">
-      <button id="palette">palette</button>
       <button id="reset">reset</button>
       <button id="save">save png</button>
     </div>
-    <div class="meta" id="info">click to zoom · drag to pan</div>
+    <div class="meta" id="info">click zoom · drag pan · julia: drag to set c</div>
   </div>
 <script>
 const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d', { willReadFrequently: true });
+const ctx = canvas.getContext('2d', { alpha: false });
 const info = document.getElementById('info');
 
-let W, H, img, data;
+let cssW = 0, cssH = 0, scale = 1;
 let mode = 'mandel';
-let maxIter = 180;
-let pal = 0;
 let view = { x: -0.75, y: 0, w: 3.2 };
-let juliaC = { x: -0.8, y: 0.156 };
-let dragging = false, last = null, moved = false;
+let juliaC = { x: -0.745, y: 0.186 };
+let maxIter = 160;
+let dragging = false, panning = false, moved = false;
+let last = null;
+let raf = 0;
+let preview = false;
 
-const palettes = [
-  (t) => [20 + 235*t, 30 + 80*t, 255*(1-t*0.3)],
-  (t) => [255*t, 40 + 120*Math.sin(t*6), 255*(1-t)],
-  (t) => [255*(1-t), 180*t, 40 + 200*t],
-  (t) => [30 + 220*t*t, 20 + 200*t, 80 + 160*(1-t)],
-];
-
-function resize() {
-  W = canvas.width = innerWidth * devicePixelRatio;
-  H = canvas.height = innerHeight * devicePixelRatio;
-  img = ctx.createImageData(W, H);
-  data = img.data;
-  draw();
+function color(t, inside) {
+  if (inside) return [0, 0, 0];
+  t = Math.min(1, Math.max(0, t));
+  if (t < 0.33) {
+    const u = t / 0.33;
+    return [8 + 40*u, 12 + 50*u, 18 + 70*u];
+  }
+  if (t < 0.66) {
+    const u = (t - 0.33) / 0.33;
+    return [48 + 40*u, 62 + 70*u, 88 + 120*u];
+  }
+  const u = (t - 0.66) / 0.34;
+  return [
+    88 + 167*u,
+    132 + 123*u,
+    208 + 47*u
+  ];
 }
 
-function mapX(px) { return view.x + (px / W - 0.5) * view.w; }
-function mapY(py) { return view.y + (py / H - 0.5) * view.w * (H / W); }
-
-function escapeColor(iter, zx, zy) {
-  if (iter >= maxIter) return [6, 6, 10];
-  const mag2 = zx*zx + zy*zy;
-  const logzn = Math.log(Math.max(mag2, 1e-12)) / 2;
-  const nu = Math.log(logzn / Math.log(2)) / Math.log(2);
-  const t = (iter + 1 - nu) / maxIter;
-  return palettes[pal % palettes.length](Math.min(1, Math.max(0, t)));
-}
+function mapX(px, w) { return view.x + (px / w - 0.5) * view.w; }
+function mapY(py, w, h) { return view.y + (py / h - 0.5) * view.w * (h / w); }
 
 function cpow4(zx, zy) {
-  const x2 = zx*zx, y2 = zy*zy;
-  const r2 = x2 - y2, i2 = 2*zx*zy;
-  return { x: r2*r2 - i2*i2, y: 2*r2*i2 };
+  const r2 = zx*zx - zy*zy, i2 = 2*zx*zy;
+  return [r2*r2 - i2*i2, 2*r2*i2];
 }
 
-function renderEscape() {
-  for (let py = 0; py < H; py++) {
-    for (let px = 0; px < W; px++) {
-      const cx = mapX(px), cy = mapY(py);
+function renderEscape(targetW, targetH, iters) {
+  const img = ctx.createImageData(targetW, targetH);
+  const data = img.data;
+  for (let py = 0; py < targetH; py++) {
+    for (let px = 0; px < targetW; px++) {
+      const cx = mapX(px, targetW);
+      const cy = mapY(py, targetW, targetH);
       let zx, zy, cr, ci;
       if (mode === 'julia') { zx = cx; zy = cy; cr = juliaC.x; ci = juliaC.y; }
       else { zx = 0; zy = 0; cr = cx; ci = cy; }
       let i = 0;
-      while (zx*zx + zy*zy <= 4 && i < maxIter) {
+      while (zx*zx + zy*zy <= 4 && i < iters) {
         if (mode === 'multi') {
           const p = cpow4(zx, zy);
-          zx = p.x + cr;
-          zy = p.y + ci;
+          zx = p[0] + cr;
+          zy = p[1] + ci;
         } else {
           const xt = zx*zx - zy*zy + cr;
           zy = 2*zx*zy + ci;
@@ -107,21 +106,27 @@ function renderEscape() {
         }
         i++;
       }
-      const [r,g,b] = escapeColor(i, zx, zy);
-      const o = (py*W + px) * 4;
+      const inside = i >= iters;
+      const mag2 = zx*zx + zy*zy;
+      const logzn = Math.log(Math.max(mag2, 1e-12)) / 2;
+      const nu = Math.log(logzn / Math.log(2)) / Math.log(2);
+      const t = (i + 1 - nu) / iters;
+      const [r,g,b] = color(t, inside);
+      const o = (py * targetW + px) * 4;
       data[o] = r; data[o+1] = g; data[o+2] = b; data[o+3] = 255;
     }
   }
-  ctx.putImageData(img, 0, 0);
+  return img;
 }
 
-function renderFern() {
-  ctx.fillStyle = '#07070b';
-  ctx.fillRect(0, 0, W, H);
+function renderFern(targetW, targetH) {
+  const img = ctx.createImageData(targetW, targetH);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = 0; d[i+1] = 0; d[i+2] = 0; d[i+3] = 255;
+  }
   let x = 0, y = 0;
-  const n = Math.min(250000, W * H * 0.35);
-  const img2 = ctx.getImageData(0, 0, W, H);
-  const d = img2.data;
+  const n = Math.min(preview ? 40000 : 180000, targetW * targetH * 0.4);
   for (let k = 0; k < n; k++) {
     const r = Math.random();
     let nx, ny;
@@ -130,25 +135,57 @@ function renderFern() {
     else if (r < 0.93) { nx = 0.20*x - 0.26*y; ny = 0.23*x + 0.22*y + 1.6; }
     else { nx = -0.15*x + 0.28*y; ny = 0.26*x + 0.24*y + 0.44; }
     x = nx; y = ny;
-    const px = ((x + 2.5) / 5) * W;
-    const py = H - (y / 10.5) * H;
+    const px = ((x + 2.5) / 5) * targetW;
+    const py = targetH - (y / 10.5) * targetH;
     const ix = px|0, iy = py|0;
-    if (ix>=0 && iy>=0 && ix<W && iy<H) {
-      const o = (iy*W + ix)*4;
-      d[o] = Math.min(255, d[o] + 8);
+    if (ix>=0 && iy>=0 && ix<targetW && iy<targetH) {
+      const o = (iy*targetW + ix)*4;
+      d[o]   = Math.min(255, d[o] + 18);
       d[o+1] = Math.min(255, d[o+1] + 28);
-      d[o+2] = Math.min(255, d[o+2] + 6);
-      d[o+3] = 255;
+      d[o+2] = Math.min(255, d[o+2] + 40);
     }
   }
-  ctx.putImageData(img2, 0, 0);
+  return img;
 }
 
-function draw() {
+function draw(isPreview) {
+  preview = !!isPreview;
   const t0 = performance.now();
-  if (mode === 'fern') renderFern();
-  else renderEscape();
-  info.textContent = `${mode} · ${W}×${H} · ${(performance.now()-t0).toFixed(0)}ms · click zoom · drag pan`;
+  const targetW = preview ? Math.max(160, (cssW / 3) | 0) : canvas.width;
+  const targetH = preview ? Math.max(100, (cssH / 3) | 0) : canvas.height;
+  const iters = preview ? 40 : maxIter;
+  const img = mode === 'fern' ? renderFern(targetW, targetH) : renderEscape(targetW, targetH, iters);
+  const tmp = document.createElement('canvas');
+  tmp.width = targetW; tmp.height = targetH;
+  tmp.getContext('2d').putImageData(img, 0, 0);
+  ctx.imageSmoothingEnabled = preview;
+  ctx.drawImage(tmp, 0, 0, canvas.width, canvas.height);
+  info.textContent = `${mode} · ${(performance.now()-t0).toFixed(0)}ms${preview ? ' preview' : ''}`;
+}
+
+function requestPreview() {
+  cancelAnimationFrame(raf);
+  raf = requestAnimationFrame(() => draw(true));
+}
+
+function requestFull() {
+  cancelAnimationFrame(raf);
+  raf = requestAnimationFrame(() => draw(false));
+}
+
+function resize() {
+  cssW = innerWidth;
+  cssH = innerHeight;
+  scale = Math.min(1.5, devicePixelRatio || 1);
+  canvas.width = Math.floor(cssW * scale);
+  canvas.height = Math.floor(cssH * scale);
+  requestFull();
+}
+
+function resetView() {
+  maxIter = 160;
+  view = mode === 'multi' ? { x: 0, y: 0, w: 3.0 } : { x: -0.75, y: 0, w: 3.2 };
+  requestFull();
 }
 
 document.querySelectorAll('[data-mode]').forEach(btn => {
@@ -159,57 +196,59 @@ document.querySelectorAll('[data-mode]').forEach(btn => {
     resetView();
   };
 });
-
-function resetView() {
-  maxIter = 180;
-  view = mode === 'multi' ? { x: 0, y: 0, w: 3.0 } : { x: -0.75, y: 0, w: 3.2 };
-  draw();
-}
-
-document.getElementById('palette').onclick = () => { pal++; draw(); };
 document.getElementById('reset').onclick = resetView;
 document.getElementById('save').onclick = () => {
+  draw(false);
   const a = document.createElement('a');
   a.download = `fractal-night-${mode}.png`;
   a.href = canvas.toDataURL('image/png');
   a.click();
 };
 
-canvas.addEventListener('mousedown', e => { dragging = true; moved = false; last = e; });
-addEventListener('mouseup', () => dragging = false);
-canvas.addEventListener('mousemove', e => {
-  if (mode === 'julia' && !dragging) {
-    juliaC.x = mapX(e.clientX * devicePixelRatio);
-    juliaC.y = mapY(e.clientY * devicePixelRatio);
-    draw();
-    return;
-  }
-  if (!dragging) return;
-  moved = true;
-  const dx = (e.clientX - last.clientX) * devicePixelRatio;
-  const dy = (e.clientY - last.clientY) * devicePixelRatio;
-  view.x -= dx / W * view.w;
-  view.y -= dy / H * view.w * (H / W);
+canvas.addEventListener('mousedown', e => {
+  dragging = true;
+  moved = false;
+  panning = mode !== 'julia' || e.shiftKey;
   last = e;
-  draw();
+});
+addEventListener('mouseup', () => {
+  if (dragging) requestFull();
+  dragging = false;
+});
+canvas.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  const dx = e.clientX - last.clientX;
+  const dy = e.clientY - last.clientY;
+  if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+  if (mode === 'julia' && !panning) {
+    juliaC.x = mapX(e.clientX * scale, canvas.width);
+    juliaC.y = mapY(e.clientY * scale, canvas.width, canvas.height);
+  } else {
+    view.x -= (dx * scale) / canvas.width * view.w;
+    view.y -= (dy * scale) / canvas.height * view.w * (canvas.height / canvas.width);
+  }
+  last = e;
+  requestPreview();
 });
 canvas.addEventListener('click', e => {
   if (mode === 'fern' || moved) return;
-  view.x = mapX(e.clientX * devicePixelRatio);
-  view.y = mapY(e.clientY * devicePixelRatio);
-  view.w *= 0.45;
-  maxIter = Math.min(600, maxIter + 20);
-  draw();
+  view.x = mapX(e.clientX * scale, canvas.width);
+  view.y = mapY(e.clientY * scale, canvas.width, canvas.height);
+  view.w *= 0.5;
+  maxIter = Math.min(420, maxIter + 16);
+  requestFull();
 });
 canvas.addEventListener('wheel', e => {
   e.preventDefault();
-  const f = e.deltaY > 0 ? 1.15 : 0.85;
-  const mx = mapX(e.clientX * devicePixelRatio);
-  const my = mapY(e.clientY * devicePixelRatio);
+  const f = e.deltaY > 0 ? 1.12 : 0.88;
+  const mx = mapX(e.clientX * scale, canvas.width);
+  const my = mapY(e.clientY * scale, canvas.width, canvas.height);
   view.x = mx + (view.x - mx) * f;
   view.y = my + (view.y - my) * f;
   view.w *= f;
-  draw();
+  requestPreview();
+  clearTimeout(canvas._zoomT);
+  canvas._zoomT = setTimeout(requestFull, 140);
 }, { passive: false });
 
 addEventListener('resize', resize);
