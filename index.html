@@ -5,23 +5,33 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>fractal night</title>
   <style>
-    :root { color-scheme: dark; }
     * { box-sizing: border-box; }
-    html, body { margin: 0; height: 100%; background: #000; color: #d7dde6; font: 14px/1.4 ui-sans-serif, system-ui, sans-serif; }
-    canvas { display: block; width: 100%; height: 100%; cursor: crosshair; image-rendering: auto; }
+    html, body {
+      margin: 0; height: 100%;
+      background: #ffffff;
+      color: #1a1a1a;
+      font: 14px/1.4 ui-sans-serif, system-ui, sans-serif;
+    }
+    canvas {
+      display: block; width: 100%; height: 100%;
+      cursor: crosshair; background: #ffffff;
+    }
     #hud {
       position: fixed; inset: 16px auto auto 16px;
-      background: rgba(8,10,14,.78); backdrop-filter: blur(10px);
-      border: 1px solid #2a3138; border-radius: 14px; padding: 14px 16px;
+      background: rgba(255,255,255,.92);
+      border: 1px solid #d0d5dd;
+      border-radius: 14px;
+      padding: 14px 16px;
       width: min(340px, calc(100vw - 32px));
     }
-    h1 { margin: 0 0 8px; font-size: 16px; letter-spacing: .04em; color: #fff; }
+    h1 { margin: 0 0 8px; font-size: 16px; color: #111; }
     .row { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
     button {
-      background: #12161b; color: inherit; border: 1px solid #3a424c;
+      background: #f4f6f8; color: #111;
+      border: 1px solid #c9d0d8;
       border-radius: 8px; padding: 6px 10px; cursor: pointer;
     }
-    button.active { border-color: #7eb3ff; background: #1a2430; color: #fff; }
+    button.active { border-color: #2f6feb; background: #e8f0ff; }
     .meta { opacity: .65; font-size: 12px; }
   </style>
 </head>
@@ -51,28 +61,17 @@ let mode = 'mandel';
 let view = { x: -0.75, y: 0, w: 3.2 };
 let juliaC = { x: -0.745, y: 0.186 };
 let maxIter = 160;
-let dragging = false, panning = false, moved = false;
-let last = null;
-let raf = 0;
-let preview = false;
+let dragging = false, panning = false, moved = false, last = null, raf = 0;
 
 function color(t, inside) {
   if (inside) return [0, 0, 0];
   t = Math.min(1, Math.max(0, t));
-  if (t < 0.33) {
-    const u = t / 0.33;
-    return [8 + 40*u, 12 + 50*u, 18 + 70*u];
+  if (t < 0.45) {
+    const u = t / 0.45;
+    return [210 - 80*u, 214 - 60*u, 220 - 20*u];
   }
-  if (t < 0.66) {
-    const u = (t - 0.33) / 0.33;
-    return [48 + 40*u, 62 + 70*u, 88 + 120*u];
-  }
-  const u = (t - 0.66) / 0.34;
-  return [
-    88 + 167*u,
-    132 + 123*u,
-    208 + 47*u
-  ];
+  const u = (t - 0.45) / 0.55;
+  return [130 - 40*u, 160 - 20*u, 210 + 20*u];
 }
 
 function mapX(px, w) { return view.x + (px / w - 0.5) * view.w; }
@@ -83,13 +82,12 @@ function cpow4(zx, zy) {
   return [r2*r2 - i2*i2, 2*r2*i2];
 }
 
-function renderEscape(targetW, targetH, iters) {
-  const img = ctx.createImageData(targetW, targetH);
+function renderEscape(w, h, iters) {
+  const img = ctx.createImageData(w, h);
   const data = img.data;
-  for (let py = 0; py < targetH; py++) {
-    for (let px = 0; px < targetW; px++) {
-      const cx = mapX(px, targetW);
-      const cy = mapY(py, targetW, targetH);
+  for (let py = 0; py < h; py++) {
+    for (let px = 0; px < w; px++) {
+      const cx = mapX(px, w), cy = mapY(py, w, h);
       let zx, zy, cr, ci;
       if (mode === 'julia') { zx = cx; zy = cy; cr = juliaC.x; ci = juliaC.y; }
       else { zx = 0; zy = 0; cr = cx; ci = cy; }
@@ -97,12 +95,10 @@ function renderEscape(targetW, targetH, iters) {
       while (zx*zx + zy*zy <= 4 && i < iters) {
         if (mode === 'multi') {
           const p = cpow4(zx, zy);
-          zx = p[0] + cr;
-          zy = p[1] + ci;
+          zx = p[0] + cr; zy = p[1] + ci;
         } else {
           const xt = zx*zx - zy*zy + cr;
-          zy = 2*zx*zy + ci;
-          zx = xt;
+          zy = 2*zx*zy + ci; zx = xt;
         }
         i++;
       }
@@ -110,23 +106,22 @@ function renderEscape(targetW, targetH, iters) {
       const mag2 = zx*zx + zy*zy;
       const logzn = Math.log(Math.max(mag2, 1e-12)) / 2;
       const nu = Math.log(logzn / Math.log(2)) / Math.log(2);
-      const t = (i + 1 - nu) / iters;
-      const [r,g,b] = color(t, inside);
-      const o = (py * targetW + px) * 4;
+      const [r,g,b] = color((i + 1 - nu) / iters, inside);
+      const o = (py * w + px) * 4;
       data[o] = r; data[o+1] = g; data[o+2] = b; data[o+3] = 255;
     }
   }
   return img;
 }
 
-function renderFern(targetW, targetH) {
-  const img = ctx.createImageData(targetW, targetH);
+function renderFern(w, h) {
+  const img = ctx.createImageData(w, h);
   const d = img.data;
   for (let i = 0; i < d.length; i += 4) {
-    d[i] = 0; d[i+1] = 0; d[i+2] = 0; d[i+3] = 255;
+    d[i] = 255; d[i+1] = 255; d[i+2] = 255; d[i+3] = 255;
   }
   let x = 0, y = 0;
-  const n = Math.min(preview ? 40000 : 180000, targetW * targetH * 0.4);
+  const n = Math.min(160000, w * h * 0.35);
   for (let k = 0; k < n; k++) {
     const r = Math.random();
     let nx, ny;
@@ -135,53 +130,49 @@ function renderFern(targetW, targetH) {
     else if (r < 0.93) { nx = 0.20*x - 0.26*y; ny = 0.23*x + 0.22*y + 1.6; }
     else { nx = -0.15*x + 0.28*y; ny = 0.26*x + 0.24*y + 0.44; }
     x = nx; y = ny;
-    const px = ((x + 2.5) / 5) * targetW;
-    const py = targetH - (y / 10.5) * targetH;
+    const px = ((x + 2.5) / 5) * w;
+    const py = h - (y / 10.5) * h;
     const ix = px|0, iy = py|0;
-    if (ix>=0 && iy>=0 && ix<targetW && iy<targetH) {
-      const o = (iy*targetW + ix)*4;
-      d[o]   = Math.min(255, d[o] + 18);
-      d[o+1] = Math.min(255, d[o+1] + 28);
-      d[o+2] = Math.min(255, d[o+2] + 40);
+    if (ix>=0 && iy>=0 && ix<w && iy<h) {
+      const o = (iy*w + ix)*4;
+      d[o] = 20; d[o+1] = 40; d[o+2] = 70;
     }
   }
   return img;
 }
 
-function draw(isPreview) {
-  preview = !!isPreview;
+function draw(preview) {
   const t0 = performance.now();
-  const targetW = preview ? Math.max(160, (cssW / 3) | 0) : canvas.width;
-  const targetH = preview ? Math.max(100, (cssH / 3) | 0) : canvas.height;
+  const w = preview ? Math.max(160, (cssW / 3)|0) : canvas.width;
+  const h = preview ? Math.max(100, (cssH / 3)|0) : canvas.height;
   const iters = preview ? 40 : maxIter;
-  const img = mode === 'fern' ? renderFern(targetW, targetH) : renderEscape(targetW, targetH, iters);
+  const img = mode === 'fern' ? renderFern(w, h) : renderEscape(w, h, iters);
   const tmp = document.createElement('canvas');
-  tmp.width = targetW; tmp.height = targetH;
+  tmp.width = w; tmp.height = h;
   tmp.getContext('2d').putImageData(img, 0, 0);
-  ctx.imageSmoothingEnabled = preview;
+  ctx.imageSmoothingEnabled = !!preview;
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(tmp, 0, 0, canvas.width, canvas.height);
-  info.textContent = `${mode} · ${(performance.now()-t0).toFixed(0)}ms${preview ? ' preview' : ''}`;
+  info.textContent = `${mode} · ${(performance.now()-t0).toFixed(0)}ms`;
 }
 
 function requestPreview() {
   cancelAnimationFrame(raf);
   raf = requestAnimationFrame(() => draw(true));
 }
-
 function requestFull() {
   cancelAnimationFrame(raf);
   raf = requestAnimationFrame(() => draw(false));
 }
 
 function resize() {
-  cssW = innerWidth;
-  cssH = innerHeight;
+  cssW = innerWidth; cssH = innerHeight;
   scale = Math.min(1.5, devicePixelRatio || 1);
   canvas.width = Math.floor(cssW * scale);
   canvas.height = Math.floor(cssH * scale);
   requestFull();
 }
-
 function resetView() {
   maxIter = 160;
   view = mode === 'multi' ? { x: 0, y: 0, w: 3.0 } : { x: -0.75, y: 0, w: 3.2 };
@@ -206,19 +197,14 @@ document.getElementById('save').onclick = () => {
 };
 
 canvas.addEventListener('mousedown', e => {
-  dragging = true;
-  moved = false;
+  dragging = true; moved = false;
   panning = mode !== 'julia' || e.shiftKey;
   last = e;
 });
-addEventListener('mouseup', () => {
-  if (dragging) requestFull();
-  dragging = false;
-});
+addEventListener('mouseup', () => { if (dragging) requestFull(); dragging = false; });
 canvas.addEventListener('mousemove', e => {
   if (!dragging) return;
-  const dx = e.clientX - last.clientX;
-  const dy = e.clientY - last.clientY;
+  const dx = e.clientX - last.clientX, dy = e.clientY - last.clientY;
   if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
   if (mode === 'julia' && !panning) {
     juliaC.x = mapX(e.clientX * scale, canvas.width);
